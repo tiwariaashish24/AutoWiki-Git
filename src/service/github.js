@@ -103,7 +103,7 @@ const SKIP_EXTENSIONS = new Set([
 
             files.push({                                                //data push into array
                 path: item.path,
-                context: Buffer.from(blob.content, "base64").toString("utf8"),  //binary convert into redable
+                content: Buffer.from(blob.content, "base64").toString("utf8"),  //binary convert into redable
             });
 
             if(files.length >= 200 ) break;

@@ -1,21 +1,68 @@
+import { createHash } from "node:crypto";
 import { OpenAIEmbeddings } from "@langchain/openai";
-import { PineconeStore } from "@langchain/pinecone";
 import { Pinecone } from "@pinecone-database/pinecone";
 
-const embeddings = new OpenAIEmbeddings({model: "text-embedding-3-small"});
-const pinecone = new Pinecone();
+const embeddings = new OpenAIEmbeddings({
+  model: "text-embedding-3-small",
+});
 
+const pc = new Pinecone({
+  apiKey: process.env.PINECONE_API_KEY,
+});
 
-function getIndex(){
-    return pinecone.Index(process.env.PINECONE_INDEX || "git-wiki")
+const UPSERT_BATCH_SIZE = 100;
+
+function getIndex(namespace) {
+  const indexName = process.env.PINECONE_INDEX || "git-wiki";
+  return pc.index({ name: indexName }).namespace(namespace);
+}
+
+function normalizeDocuments(documents) {
+  return documents
+    .map((doc) => ({
+      pageContent:
+        typeof doc.pageContent === "string" ? doc.pageContent : "",
+      metadata: doc.metadata ?? {},
+    }))
+    .filter((doc) => doc.pageContent.trim().length > 0);
+}
+
+function buildRecordId(repo, metadata, content) {
+  return createHash("sha256")
+    .update(`${repo}:${metadata.path ?? ""}:${content}`)
+    .digest("hex");
 }
 
 export async function saveChunks(repo, documents) {
-    const namespace  = repo.replace("/","-");
+  const chunks = normalizeDocuments(documents);
 
-    await pinecone.fromDocuments(documents, embeddings, {
-        pineconeIndex: getIndex(),
-        namespace,
-        
-    })
+  if (!chunks.length) {
+    return { saved: false, chunkCount: 0 };
+  }
+
+  const namespace = repo.replace("/", "-");
+  const index = getIndex(namespace);
+  const texts = chunks.map((doc) => doc.pageContent);
+  const vectors = await embeddings.embedDocuments(texts);
+
+  const records = chunks.map((doc, i) => ({
+    id: buildRecordId(repo, doc.metadata, doc.pageContent),
+    values: vectors[i],
+    metadata: {
+      text: doc.pageContent,
+      path: doc.metadata.path,
+      repo: doc.metadata.repo ?? repo,
+    },
+  }));
+
+  for (let i = 0; i < records.length; i += UPSERT_BATCH_SIZE) {
+    await index.upsert({
+      records: records.slice(i, i + UPSERT_BATCH_SIZE),
+    });
+  }
+
+  return {
+    saved: true,
+    chunkCount: chunks.length,
+  };
 }

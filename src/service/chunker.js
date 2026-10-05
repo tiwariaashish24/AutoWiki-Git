@@ -14,6 +14,7 @@ export async function chunkFiles(files, repo) {
         const chunks  = await splitter.createDocuments(
             [file.content],
             [{path : file.path, repo}],
+        
         )
 
         documents.push(...chunks);

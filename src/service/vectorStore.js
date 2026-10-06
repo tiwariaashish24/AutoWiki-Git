@@ -66,3 +66,23 @@ export async function saveChunks(repo, documents) {
     chunkCount: chunks.length,
   };
 }
+export async function search(repo, query) {
+  const namespace = repo.replace("/", "-");
+  const index = getIndex(namespace);
+
+  const [vector] = await embeddings.embedDocuments([query]);
+
+  const result = await index.query({
+    vector,
+    topK: 5,
+    includeMetadata: true,
+  });
+
+  return (result.matches ?? []).map((match) => ({
+    pageContent: match.metadata?.text ?? "",
+    metadata: {
+      path: match.metadata?.path ?? "",
+      repo: match.metadata?.repo ?? repo,
+    },
+  }));
+}
